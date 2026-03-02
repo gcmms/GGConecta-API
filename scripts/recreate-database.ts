@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -135,7 +136,7 @@ const createStatements = [
   `
   CREATE TABLE IF NOT EXISTS community_posts (
     id INT NOT NULL AUTO_INCREMENT,
-    user_id INT NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
     content TEXT NOT NULL,
     created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
@@ -148,7 +149,7 @@ const createStatements = [
   CREATE TABLE IF NOT EXISTS community_post_likes (
     id INT NOT NULL AUTO_INCREMENT,
     post_id INT NOT NULL,
-    user_id INT NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
     CONSTRAINT pk_community_post_likes PRIMARY KEY (id),
     CONSTRAINT fk_community_post_likes_post FOREIGN KEY (post_id) REFERENCES community_posts (id) ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT fk_community_post_likes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -161,7 +162,7 @@ const createStatements = [
   CREATE TABLE IF NOT EXISTS community_post_comments (
     id INT NOT NULL AUTO_INCREMENT,
     post_id INT NOT NULL,
-    user_id INT NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
     comment TEXT NOT NULL,
     created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT pk_community_post_comments PRIMARY KEY (id),
@@ -188,6 +189,34 @@ async function recreateDatabase() {
       console.log(statement);
       await prisma.$executeRawUnsafe(statement);
     }
+
+    console.log('Criando usuario admin padrao...');
+    const passwordHash = await bcrypt.hash('123456', 10);
+    await prisma.$executeRawUnsafe(
+      `
+      INSERT INTO users (
+        first_name,
+        last_name,
+        birth_date,
+        email,
+        role,
+        password_hash,
+        person_type
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        role = VALUES(role),
+        password_hash = VALUES(password_hash)
+      `,
+      'Admin',
+      'Sistema',
+      '1990-01-01',
+      'admin@admin.com',
+      'Administrador',
+      passwordHash,
+      'Membro'
+    );
+    console.log('Usuario admin padrao criado/atualizado com sucesso.');
   } finally {
     console.log('Reativando verificacao de chave estrangeira...');
     await prisma.$executeRawUnsafe('SET FOREIGN_KEY_CHECKS = 1;');
