@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Modelo mínimo para permitir geração do client e rodar scripts.
+model User {
+  id                 Int      @id @default(autoincrement()) @db.UnsignedInt
+  first_name         String   @map("first_name")
+  last_name          String   @map("last_name")
+  birth_date         DateTime @map("birth_date")
+  email              String   @unique
+  phone              String?  @db.VarChar(255)
+  secondary_phone    String?  @db.VarChar(255)
+  social_name        String?  @db.VarChar(255)
+  gender             String?  @db.VarChar(30)
+  marital_status     String?  @db.VarChar(50)
+  cpf                String?  @db.VarChar(20)
+  rg_number          String?  @db.VarChar(30)
+  rg_issuer          String?  @db.VarChar(100)
+  rg_state           String?  @db.VarChar(10)
+  baptism_date       DateTime? @db.Date
+  profession_faith_date DateTime? @db.Date
+  emergency_contact_name String? @db.VarChar(255)
+  emergency_contact_phone String? @db.VarChar(255)
+  person_type        String   @default("Membro") @db.VarChar(20)
+  member_status      String?  @db.VarChar(40)
+  church_entry_date  DateTime? @db.Date
+  church_origin      String?  @db.VarChar(255)
+  internal_notes     String?  @db.Text
+  password_hash      String   @map("password_hash")
+  role               String?  @map("role") @db.VarChar(50)
+  address_street     String?  @db.VarChar(255)
+  address_number     String?  @db.VarChar(50)
+  address_district   String?  @db.VarChar(255)
+  address_city       String?  @db.VarChar(255)
+  address_state      String?  @db.VarChar(100)
+  address_zip        String?  @db.VarChar(50)
+  address_complement String?  @db.VarChar(255)
+  created_at         DateTime @default(now()) @map("created_at")
+  updated_at         DateTime @updatedAt @map("updated_at")
+  led_ministries     Ministry[] @relation("MinistryLeader")
+  presbyter_responsible_ministries Ministry[] @relation("MinistryPresbyter")
+  ministry_memberships MinistryMember[]
+
+  @@map("users")
+}
+
+model Ministry {
+  id              Int             @id @default(autoincrement()) @db.UnsignedInt
+  name            String          @unique @db.VarChar(120)
+  category        String?         @db.VarChar(120)
+  description     String?         @db.Text
+  is_active       Boolean         @default(true)
+  leader_user_id  Int?            @db.UnsignedInt
+  presbyter_user_id Int?          @db.UnsignedInt
+  leader          User?           @relation("MinistryLeader", fields: [leader_user_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  presbyter       User?           @relation("MinistryPresbyter", fields: [presbyter_user_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  members         MinistryMember[]
+  created_at      DateTime        @default(now()) @map("created_at")
+  updated_at      DateTime        @updatedAt @map("updated_at")
+
+  @@map("ministries")
+}
+
+model MinistryMember {
+  id          Int       @id @default(autoincrement()) @db.UnsignedInt
+  ministry_id Int       @db.UnsignedInt
+  user_id     Int       @db.UnsignedInt
+  ministry    Ministry  @relation(fields: [ministry_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  created_at  DateTime  @default(now()) @map("created_at")
+
+  @@unique([ministry_id, user_id])
+  @@map("ministry_members")
+}
