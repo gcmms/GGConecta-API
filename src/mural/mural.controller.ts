@@ -5,6 +5,7 @@ import {
   Get,
   HttpException,
   HttpStatus,
+  Patch,
   Param,
   Post,
   UseGuards
@@ -16,6 +17,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Role } from '../common/constants/roles.enum';
 import { CreateMuralDto } from './dto/create-mural.dto';
 import { MuralService } from './mural.service';
+import { UpdateMuralDto } from './dto/update-mural.dto';
 
 @ApiTags('Mural')
 @Controller('mural')
@@ -30,6 +32,30 @@ export class MuralController {
       // eslint-disable-next-line no-console
       console.error('Failed to list mural items', error);
       throw new HttpException({ message: 'Erro ao listar mural.' }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get(':id')
+  async findById(@Param('id') idParam: string) {
+    const id = Number(idParam);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new HttpException({ message: 'ID inválido.' }, HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const item = await this.muralService.findById(id);
+      if (!item) {
+        throw new HttpException({ message: 'Aviso não encontrado.' }, HttpStatus.NOT_FOUND);
+      }
+      return item;
+    } catch (error: any) {
+      if (error?.status) {
+        throw error;
+      }
+      // eslint-disable-next-line no-console
+      console.error('Failed to get mural item', error);
+      throw new HttpException({ message: 'Erro ao buscar aviso.' }, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
@@ -49,6 +75,36 @@ export class MuralController {
       const message =
         status === HttpStatus.INTERNAL_SERVER_ERROR
           ? 'Erro ao criar aviso.'
+          : error?.message || 'Erro.';
+      throw new HttpException({ message }, status);
+    }
+  }
+
+  @ApiBearerAuth('bearerAuth')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @Patch(':id')
+  async update(@Param('id') idParam: string, @Body() body: UpdateMuralDto) {
+    const id = Number(idParam);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new HttpException({ message: 'ID inválido.' }, HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const item = await this.muralService.update(id, body);
+      if (!item) {
+        throw new HttpException('Aviso não encontrado.', HttpStatus.NOT_FOUND);
+      }
+      return {
+        message: 'Aviso atualizado com sucesso!',
+        item
+      };
+    } catch (error: any) {
+      const status = error?.status || HttpStatus.INTERNAL_SERVER_ERROR;
+      const message =
+        status === HttpStatus.INTERNAL_SERVER_ERROR
+          ? 'Erro ao atualizar aviso.'
           : error?.message || 'Erro.';
       throw new HttpException({ message }, status);
     }

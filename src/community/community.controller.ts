@@ -47,6 +47,39 @@ export class CommunityController {
     }
   }
 
+  @Get(':id')
+  async getById(
+    @Param('id') idParam: string,
+    @Query('userId') userId?: string
+  ) {
+    const id = Number(idParam);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new HttpException({ message: 'ID inválido.' }, HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const parsedUserId = userId ? Number(userId) : undefined;
+      const post = await this.communityService.findOne(id, parsedUserId);
+
+      if (!post) {
+        throw new HttpException({ message: 'Publicação não encontrada.' }, HttpStatus.NOT_FOUND);
+      }
+
+      return post;
+    } catch (error: any) {
+      if (error?.status) {
+        throw error;
+      }
+      // eslint-disable-next-line no-console
+      console.error('Failed to get community post', error);
+      throw new HttpException(
+        { message: 'Erro ao carregar publicação.' },
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
   @Post()
   async create(@Body() body: CreateCommunityPostDto) {
     const missing = ['user_id', 'content'].filter((field) => {
@@ -112,7 +145,10 @@ export class CommunityController {
         liked: result.liked,
         likes_count: result.likesCount
       };
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.status) {
+        throw error;
+      }
       // eslint-disable-next-line no-console
       console.error('Failed to toggle like', error);
       throw new HttpException(

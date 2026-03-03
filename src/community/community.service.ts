@@ -56,6 +56,45 @@ export class CommunityService {
     return Array.isArray(rows) ? rows : [];
   }
 
+  async findOne(postId: number, userId?: number) {
+    const rows = await this.postsRepository.query(
+      `
+        SELECT
+          p.id,
+          p.user_id,
+          p.content,
+          p.created_at,
+          p.updated_at,
+          CONCAT(u.first_name, ' ', u.last_name) AS author_name,
+          IFNULL(l.likes_count, 0) AS likes_count,
+          IFNULL(c.comments_count, 0) AS comments_count,
+          CASE WHEN ul.post_id IS NULL THEN 0 ELSE 1 END AS liked_by_user
+        FROM community_posts p
+        INNER JOIN users u ON u.id = p.user_id
+        LEFT JOIN (
+          SELECT post_id, COUNT(*) AS likes_count
+          FROM community_post_likes
+          GROUP BY post_id
+        ) l ON l.post_id = p.id
+        LEFT JOIN (
+          SELECT post_id, COUNT(*) AS comments_count
+          FROM community_post_comments
+          GROUP BY post_id
+        ) c ON c.post_id = p.id
+        LEFT JOIN (
+          SELECT post_id
+          FROM community_post_likes
+          WHERE user_id = ?
+        ) ul ON ul.post_id = p.id
+        WHERE p.id = ?
+        LIMIT 1
+      `,
+      [userId || 0, postId]
+    );
+
+    return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  }
+
   async create({ user_id, content }: { user_id: number; content: string }) {
     const result = await this.postsRepository.query(
       `
@@ -87,16 +126,28 @@ export class CommunityService {
   }
 
   async toggleLike({ postId, userId }: { postId: number; userId: number }) {
-    const existing = await this.likesRepository.findOne({
-      where: { postId, userId }
-    });
+    const postRows = await this.postsRepository.query(
+      `SELECT id FROM community_posts WHERE id = ? LIMIT 1`,
+      [postId]
+    );
 
+    if (!Array.isArray(postRows) || postRows.length === 0) {
+      throw new HttpException({ message: 'Publicação não encontrada.' }, HttpStatus.NOT_FOUND);
+    }
+
+    const deleteResult = await this.likesRepository.query(
+      `DELETE FROM community_post_likes WHERE post_id = ? AND user_id = ?`,
+      [postId, userId]
+    );
+
+    const removedCount = Number(deleteResult?.affectedRows || 0);
     let liked = false;
 
-    if (existing) {
-      await this.likesRepository.delete({ id: existing.id });
-    } else {
-      await this.likesRepository.insert({ postId, userId } as any);
+    if (removedCount === 0) {
+      await this.likesRepository.query(
+        `INSERT INTO community_post_likes (post_id, user_id) VALUES (?, ?)`,
+        [postId, userId]
+      );
       liked = true;
     }
 
