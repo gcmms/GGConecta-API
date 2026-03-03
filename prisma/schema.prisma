@@ -34,6 +34,7 @@ model User {
   internal_notes     String?  @db.Text
   password_hash      String   @map("password_hash")
   role               String?  @map("role") @db.VarChar(50)
+  session_version    Int      @default(1) @db.Int
   address_street     String?  @db.VarChar(255)
   address_number     String?  @db.VarChar(50)
   address_district   String?  @db.VarChar(255)

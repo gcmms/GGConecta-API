@@ -5,6 +5,7 @@ const prisma = new PrismaClient();
 
 const dropStatements = [
   'DROP TABLE IF EXISTS birthday_message_templates',
+  'DROP TABLE IF EXISTS user_password_history',
   'DROP TABLE IF EXISTS ministry_members',
   'DROP TABLE IF EXISTS ministries',
   'DROP TABLE IF EXISTS community_post_comments',
@@ -41,6 +42,7 @@ const createStatements = [
     church_origin VARCHAR(255) NULL,
     internal_notes TEXT NULL,
     role VARCHAR(50) NOT NULL DEFAULT 'Membro',
+    session_version INT NOT NULL DEFAULT 1,
     password_hash VARCHAR(255) NOT NULL,
     address_street VARCHAR(255) NULL,
     address_number VARCHAR(50) NULL,
@@ -53,6 +55,21 @@ const createStatements = [
     updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     CONSTRAINT pk_users PRIMARY KEY (id),
     CONSTRAINT uq_users_email UNIQUE KEY (email)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS user_password_history (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id INT UNSIGNED NOT NULL,
+    admin_user_id INT UNSIGNED NULL,
+    mode VARCHAR(20) NOT NULL,
+    send_email TINYINT(1) NOT NULL DEFAULT 0,
+    changed_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT pk_user_password_history PRIMARY KEY (id),
+    CONSTRAINT fk_user_password_history_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_user_password_history_admin FOREIGN KEY (admin_user_id) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE,
+    INDEX idx_user_password_history_user_id (user_id),
+    INDEX idx_user_password_history_admin_user_id (admin_user_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `,
   `

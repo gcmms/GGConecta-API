@@ -12,6 +12,7 @@ export type JwtPayload = {
   last_name: string;
   email: string;
   role: string;
+  session_version: number;
 };
 
 @Injectable()
@@ -34,12 +35,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Token inválido.');
     }
 
+    if ((user.memberStatus || '').trim().toLowerCase() === 'inativo') {
+      throw new UnauthorizedException('Usuário inativo.');
+    }
+
+    if (!payload.session_version || payload.session_version !== user.sessionVersion) {
+      throw new UnauthorizedException('Sessão inválida.');
+    }
+
     return {
       id: user.id,
       first_name: user.firstName,
       last_name: user.lastName,
       email: user.email,
-      role: user.role
+      role: user.role,
+      member_status: user.memberStatus,
+      session_version: user.sessionVersion
     };
   }
 }

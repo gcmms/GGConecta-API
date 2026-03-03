@@ -24,9 +24,14 @@ export class RolesGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const userRole: string | undefined = request.user?.role;
+    const memberStatus: string | undefined = request.user?.member_status;
 
     if (!userRole) {
       throw new ForbiddenException('Acesso restrito a administradores.');
+    }
+
+    if ((memberStatus || '').trim().toLowerCase() === 'inativo') {
+      throw new ForbiddenException('Usuário inativo sem permissão de acesso.');
     }
 
     const normalizedRole = userRole.trim();

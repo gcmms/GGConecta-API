@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Query,
+  Req,
   UseGuards
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -17,7 +18,6 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Role } from '../common/constants/roles.enum';
 import { CommentCommunityPostDto } from './dto/comment-post.dto';
 import { CreateCommunityPostDto } from './dto/create-post.dto';
-import { LikeCommunityPostDto } from './dto/like-post.dto';
 import { CommunityService } from './community.service';
 
 @ApiTags('Community')
@@ -81,8 +81,10 @@ export class CommunityController {
   }
 
   @Post()
-  async create(@Body() body: CreateCommunityPostDto) {
-    const missing = ['user_id', 'content'].filter((field) => {
+  @ApiBearerAuth('bearerAuth')
+  @UseGuards(JwtAuthGuard)
+  async create(@Body() body: CreateCommunityPostDto, @Req() req: any) {
+    const missing = ['content'].filter((field) => {
       const value = (body as Record<string, any>)[field];
       return value === undefined || value === null || String(value).trim() === '';
     });
@@ -95,8 +97,13 @@ export class CommunityController {
     }
 
     try {
+      const currentUserId = Number(req.user?.id);
+      if (!Number.isInteger(currentUserId) || currentUserId <= 0) {
+        throw new HttpException({ message: 'Usuário não identificado.' }, HttpStatus.UNAUTHORIZED);
+      }
+
       const post = await this.communityService.create({
-        user_id: Number(body.user_id),
+        user_id: currentUserId,
         content: body.content
       });
 
@@ -115,29 +122,24 @@ export class CommunityController {
   }
 
   @Post(':id/like')
-  async like(
-    @Param('id') idParam: string,
-    @Body() body: LikeCommunityPostDto
-  ) {
+  @ApiBearerAuth('bearerAuth')
+  @UseGuards(JwtAuthGuard)
+  async like(@Param('id') idParam: string, @Req() req: any) {
     const id = Number(idParam);
-
-    const missing = ['user_id'].filter((field) => {
-      const value = (body as Record<string, any>)[field];
-      return value === undefined || value === null || String(value).trim() === '';
-    });
-
-    if (missing.length > 0) {
-      throw new HttpException({ message: 'user_id é obrigatório.' }, HttpStatus.BAD_REQUEST);
-    }
 
     if (!Number.isInteger(id) || id <= 0) {
       throw new HttpException({ message: 'ID inválido.' }, HttpStatus.BAD_REQUEST);
     }
 
     try {
+      const currentUserId = Number(req.user?.id);
+      if (!Number.isInteger(currentUserId) || currentUserId <= 0) {
+        throw new HttpException({ message: 'Usuário não identificado.' }, HttpStatus.UNAUTHORIZED);
+      }
+
       const result = await this.communityService.toggleLike({
         postId: id,
-        userId: Number(body.user_id)
+        userId: currentUserId
       });
 
       return {
@@ -159,13 +161,16 @@ export class CommunityController {
   }
 
   @Post(':id/comments')
+  @ApiBearerAuth('bearerAuth')
+  @UseGuards(JwtAuthGuard)
   async comment(
     @Param('id') idParam: string,
-    @Body() body: CommentCommunityPostDto
+    @Body() body: CommentCommunityPostDto,
+    @Req() req: any
   ) {
     const id = Number(idParam);
 
-    const missing = ['user_id', 'comment'].filter((field) => {
+    const missing = ['comment'].filter((field) => {
       const value = (body as Record<string, any>)[field];
       return value === undefined || value === null || String(value).trim() === '';
     });
@@ -182,9 +187,14 @@ export class CommunityController {
     }
 
     try {
+      const currentUserId = Number(req.user?.id);
+      if (!Number.isInteger(currentUserId) || currentUserId <= 0) {
+        throw new HttpException({ message: 'Usuário não identificado.' }, HttpStatus.UNAUTHORIZED);
+      }
+
       const result = await this.communityService.createComment({
         postId: id,
-        userId: Number(body.user_id),
+        userId: currentUserId,
         comment: body.comment
       });
 

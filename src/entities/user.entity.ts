@@ -97,6 +97,9 @@ export class User {
   })
   role: string;
 
+  @Column({ name: 'session_version', type: 'int', default: 1 })
+  sessionVersion: number;
+
   @Column({ name: 'password_hash', select: false })
   passwordHash: string;
 

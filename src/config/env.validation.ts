@@ -9,6 +9,7 @@ export const envValidationSchema = Joi.object({
   DB_NAME: Joi.string().default('ipiggconect'),
   DB_CONNECTION_LIMIT: Joi.number().default(10),
   DB_SOCKET_PATH: Joi.string().allow('', null),
+  CORS_ORIGINS: Joi.string().allow('', null).default(''),
   JWT_SECRET: Joi.string().required(),
   GOOGLE_CALENDAR_ICAL_URL: Joi.string().uri().required(),
   API_BASE_URL: Joi.string().uri().default('http://localhost:3000')

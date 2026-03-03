@@ -8,8 +8,29 @@ import { setupSwagger } from './config/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  app.enableCors();
-  app.use(json());
+  const configService = app.get(ConfigService);
+  const allowedOrigins = (configService.get<string>('CORS_ORIGINS') || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true
+  });
+  app.use(json({ limit: '1mb' }));
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -19,7 +40,6 @@ async function bootstrap() {
     })
   );
 
-  const configService = app.get(ConfigService);
   setupSwagger(app, configService);
 
   const port = configService.get<number>('PORT') || 3000;

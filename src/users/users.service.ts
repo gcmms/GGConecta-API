@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as bcrypt from 'bcryptjs';
 import { In, Repository } from 'typeorm';
 import { Role } from '../common/constants/roles.enum';
 import { User } from '../entities/user.entity';
@@ -7,12 +8,24 @@ import { UpdateProfileDto } from '../auth/dto/update-profile.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { Ministry } from '../entities/ministry.entity';
 import { MinistryMember } from '../entities/ministry-member.entity';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdatePasswordDto } from './dto/update-password.dto';
 
 type UserMinistryLink = {
   ministry_id: number;
   ministry_name: string;
   role: 'Líder' | 'Membro';
   is_active: boolean;
+};
+
+type PasswordHistoryRow = {
+  id: number;
+  user_id: number;
+  admin_user_id: number | null;
+  mode: 'auto' | 'manual';
+  send_email: number;
+  changed_at: Date | string;
+  admin_name: string | null;
 };
 
 const mapUser = (user: User, ministries: UserMinistryLink[] = []) => ({
@@ -64,6 +77,43 @@ const mapUser = (user: User, ministries: UserMinistryLink[] = []) => ({
 });
 
 const safeTrim = (value?: string | null) => value?.trim() || null;
+const normalizeRole = (incomingRole?: string) => {
+  if (!incomingRole) return Role.MEMBER;
+
+  const normalized = incomingRole.trim().toLowerCase();
+  if (normalized === 'administrador') return Role.ADMIN;
+  if (normalized === 'membro') return Role.MEMBER;
+  if (normalized === 'não membro' || normalized === 'nao membro') return Role.NON_MEMBER;
+
+  return Role.MEMBER;
+};
+
+const normalizePersonType = (incoming?: string, role?: string) => {
+  if (incoming?.trim().toLowerCase() === 'membro') return 'Membro';
+  if (incoming?.trim().toLowerCase() === 'visitante') return 'Visitante';
+  return normalizeRole(role) === Role.NON_MEMBER ? 'Visitante' : 'Membro';
+};
+
+const generateTemporaryPassword = (length = 10) => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+  return Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+};
+
+const ensurePasswordHistoryTableSql = `
+  CREATE TABLE IF NOT EXISTS user_password_history (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id INT UNSIGNED NOT NULL,
+    admin_user_id INT UNSIGNED NULL,
+    mode VARCHAR(20) NOT NULL,
+    send_email TINYINT(1) NOT NULL DEFAULT 0,
+    changed_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT pk_user_password_history PRIMARY KEY (id),
+    CONSTRAINT fk_user_password_history_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_user_password_history_admin FOREIGN KEY (admin_user_id) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE,
+    INDEX idx_user_password_history_user_id (user_id),
+    INDEX idx_user_password_history_admin_user_id (admin_user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+`;
 
 @Injectable()
 export class UsersService {
@@ -93,6 +143,71 @@ export class UsersService {
 
     const ministriesByUserId = await this.getMinistryLinksByUserIds([user.id]);
     return mapUser(user, ministriesByUserId.get(user.id) || []);
+  }
+
+  async createMember(data: CreateUserDto) {
+    const missingFields = ['first_name', 'last_name', 'birth_date', 'email'].filter((field) => {
+      const value = (data as unknown as Record<string, unknown>)[field];
+      return value === undefined || value === null || String(value).trim() === '';
+    });
+
+    if (missingFields.length > 0) {
+      throw new HttpException(
+        `Campos obrigatórios não informados: ${missingFields.join(', ')}`,
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    const normalizedEmail = data.email.trim().toLowerCase();
+    const existing = await this.usersRepository.findOne({ where: { email: normalizedEmail } });
+    if (existing) {
+      throw new HttpException('E-mail já cadastrado.', HttpStatus.CONFLICT);
+    }
+
+    const temporaryPassword = generateTemporaryPassword();
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+    const created = this.usersRepository.create({
+      firstName: data.first_name.trim(),
+      lastName: data.last_name.trim(),
+      birthDate: data.birth_date,
+      email: normalizedEmail,
+      phone: safeTrim(data.phone),
+      secondaryPhone: safeTrim(data.secondary_phone),
+      socialName: safeTrim(data.social_name),
+      gender: safeTrim(data.gender),
+      maritalStatus: safeTrim(data.marital_status),
+      cpf: safeTrim(data.cpf),
+      rgNumber: safeTrim(data.rg_number),
+      rgIssuer: safeTrim(data.rg_issuer),
+      rgState: safeTrim(data.rg_state),
+      baptismDate: safeTrim(data.baptism_date),
+      professionFaithDate: safeTrim(data.profession_faith_date),
+      emergencyContactName: safeTrim(data.emergency_contact_name),
+      emergencyContactPhone: safeTrim(data.emergency_contact_phone),
+      personType: normalizePersonType(data.person_type, data.role),
+      memberStatus: safeTrim(data.member_status),
+      churchEntryDate: safeTrim(data.church_entry_date),
+      churchOrigin: safeTrim(data.church_origin),
+      internalNotes: safeTrim(data.internal_notes),
+      role: normalizeRole(data.role),
+      passwordHash,
+      addressStreet: safeTrim(data.address?.street),
+      addressNumber: safeTrim(data.address?.number),
+      addressDistrict: safeTrim(data.address?.district),
+      addressCity: safeTrim(data.address?.city),
+      addressState: safeTrim(data.address?.state),
+      addressZip: safeTrim(data.address?.zip),
+      addressComplement: safeTrim(data.address?.complement)
+    });
+
+    const saved = await this.usersRepository.save(created);
+    const ministriesByUserId = await this.getMinistryLinksByUserIds([saved.id]);
+
+    return {
+      user: mapUser(saved, ministriesByUserId.get(saved.id) || []),
+      temporaryPassword
+    };
   }
 
   async updateMemberRole(userId: number, { role }: UpdateRoleDto) {
@@ -164,6 +279,117 @@ export class UsersService {
     const saved = await this.usersRepository.save(user);
     const ministriesByUserId = await this.getMinistryLinksByUserIds([saved.id]);
     return mapUser(saved, ministriesByUserId.get(saved.id) || []);
+  }
+
+  async updateMemberPassword(userId: number, data: UpdatePasswordDto) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new HttpException('Usuário não encontrado.', HttpStatus.NOT_FOUND);
+    }
+
+    let plainPassword: string;
+
+    if (data.mode === 'manual') {
+      const manualPassword = data.password?.trim();
+      if (!manualPassword) {
+        throw new HttpException('Senha é obrigatória no modo manual.', HttpStatus.BAD_REQUEST);
+      }
+      plainPassword = manualPassword;
+    } else {
+      plainPassword = generateTemporaryPassword();
+    }
+
+    const passwordHash = await bcrypt.hash(plainPassword, 10);
+    await this.usersRepository.update(userId, { passwordHash });
+
+    return {
+      mode: data.mode,
+      temporaryPassword: data.mode === 'auto' ? plainPassword : null,
+      emailSent: false
+    };
+  }
+
+  async updateMemberPasswordWithHistory(
+    userId: number,
+    adminUserId: number | null,
+    data: UpdatePasswordDto
+  ) {
+    const result = await this.updateMemberPassword(userId, data);
+
+    await this.usersRepository.query(ensurePasswordHistoryTableSql);
+    await this.usersRepository.query(
+      `
+        INSERT INTO user_password_history (user_id, admin_user_id, mode, send_email)
+        VALUES (?, ?, ?, ?)
+      `,
+      [userId, adminUserId, data.mode, data.send_email ? 1 : 0]
+    );
+
+    return result;
+  }
+
+  async listMemberPasswordHistory(userId: number) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new HttpException('Usuário não encontrado.', HttpStatus.NOT_FOUND);
+    }
+
+    await this.usersRepository.query(ensurePasswordHistoryTableSql);
+    const rows = (await this.usersRepository.query(
+      `
+        SELECT
+          h.id,
+          h.user_id,
+          h.admin_user_id,
+          h.mode,
+          h.send_email,
+          h.changed_at,
+          CASE
+            WHEN a.id IS NULL THEN NULL
+            ELSE CONCAT(a.first_name, ' ', a.last_name)
+          END AS admin_name
+        FROM user_password_history h
+        LEFT JOIN users a ON a.id = h.admin_user_id
+        WHERE h.user_id = ?
+        ORDER BY h.changed_at DESC
+      `,
+      [userId]
+    )) as PasswordHistoryRow[];
+
+    return rows.map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      admin_user_id: row.admin_user_id,
+      admin_name: row.admin_name || 'Administrador',
+      mode: row.mode,
+      send_email: Boolean(row.send_email),
+      changed_at:
+        typeof row.changed_at === 'string'
+          ? row.changed_at
+          : row.changed_at?.toISOString?.() || null
+    }));
+  }
+
+  async getMemberWhatsAppLink(userId: number) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new HttpException('Usuário não encontrado.', HttpStatus.NOT_FOUND);
+    }
+
+    const rawPhone = `${user.phone || user.secondaryPhone || ''}`.replace(/\D/g, '');
+    if (!rawPhone) {
+      throw new HttpException('Usuário não possui telefone cadastrado.', HttpStatus.BAD_REQUEST);
+    }
+
+    let normalized = rawPhone.replace(/^0+/, '');
+    if (!normalized.startsWith('55')) {
+      normalized = `55${normalized}`;
+    }
+
+    return {
+      phone: normalized,
+      whatsapp_url: `https://web.whatsapp.com/send?phone=${normalized}`
+    };
   }
 
   private async getMinistryLinksByUserIds(userIds: number[]) {

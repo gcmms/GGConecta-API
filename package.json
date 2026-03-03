@@ -13,6 +13,7 @@
     "prisma:generate": "prisma generate",
     "migrate:address": "npm run prisma:generate && ts-node scripts/migrate-address.ts",
     "migrate:user-profile-fields": "npm run prisma:generate && ts-node scripts/migrate-user-profile-fields.ts",
+    "migrate:session-version": "npm run prisma:generate && ts-node scripts/migrate-session-version.ts",
     "migrate:ministries": "ts-node scripts/migrate-ministries.ts",
     "migrate:birthday-templates": "ts-node scripts/migrate-birthday-templates.ts",
     "db:recreate": "npm run prisma:generate && ts-node scripts/recreate-database.ts"

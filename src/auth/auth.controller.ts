@@ -41,6 +41,74 @@ function extractErrorStatusAndMessage(
   return { status, message };
 }
 
+type LoginAttemptState = {
+  count: number;
+  windowStartedAt: number;
+  blockedUntil: number;
+};
+
+const ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
+const ATTEMPT_BLOCK_MS = 15 * 60 * 1000;
+const MAX_ATTEMPTS = 5;
+const loginAttempts = new Map<string, LoginAttemptState>();
+
+const normalizeEmail = (email?: string) => (email || '').trim().toLowerCase();
+
+const getClientIp = (req: any) => {
+  const xForwardedFor = req?.headers?.['x-forwarded-for'];
+  const forwardedIp = Array.isArray(xForwardedFor)
+    ? xForwardedFor[0]
+    : typeof xForwardedFor === 'string'
+      ? xForwardedFor.split(',')[0]
+      : '';
+  return (forwardedIp || req?.ip || req?.socket?.remoteAddress || 'unknown').trim();
+};
+
+const buildLoginAttemptKey = (email: string, ip: string, scope: 'user' | 'admin') =>
+  `${scope}:${normalizeEmail(email)}:${ip}`;
+
+const assertNotRateLimited = (key: string) => {
+  const state = loginAttempts.get(key);
+  const now = Date.now();
+  if (!state) return;
+
+  if (state.blockedUntil > now) {
+    throw new HttpException(
+      { message: 'Muitas tentativas. Tente novamente em alguns minutos.' },
+      HttpStatus.TOO_MANY_REQUESTS
+    );
+  }
+
+  if (now - state.windowStartedAt > ATTEMPT_WINDOW_MS) {
+    loginAttempts.delete(key);
+  }
+};
+
+const registerFailedAttempt = (key: string) => {
+  const now = Date.now();
+  const current = loginAttempts.get(key);
+
+  if (!current || now - current.windowStartedAt > ATTEMPT_WINDOW_MS) {
+    loginAttempts.set(key, {
+      count: 1,
+      windowStartedAt: now,
+      blockedUntil: 0
+    });
+    return;
+  }
+
+  const nextCount = current.count + 1;
+  loginAttempts.set(key, {
+    count: nextCount,
+    windowStartedAt: current.windowStartedAt,
+    blockedUntil: nextCount >= MAX_ATTEMPTS ? now + ATTEMPT_BLOCK_MS : 0
+  });
+};
+
+const clearFailedAttempts = (key: string) => {
+  loginAttempts.delete(key);
+};
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -64,7 +132,7 @@ export class AuthController {
   }
 
   @Post('login')
-  async login(@Body() body: LoginDto) {
+  async login(@Body() body: LoginDto, @Req() req: any) {
     const missing = ['email', 'password'].filter((field) => {
       const value = (body as Record<string, any>)[field];
       return value === undefined || value === null || String(value).trim() === '';
@@ -77,14 +145,24 @@ export class AuthController {
       );
     }
 
+    const loginAttemptKey = buildLoginAttemptKey(body.email, getClientIp(req), 'user');
+    assertNotRateLimited(loginAttemptKey);
+
     try {
       const { token, user } = await this.authService.login(body);
+      clearFailedAttempts(loginAttemptKey);
       return {
         message: 'Login realizado com sucesso!',
         token,
         user
       };
     } catch (error: any) {
+      if (
+        error?.status === HttpStatus.UNAUTHORIZED ||
+        error?.status === HttpStatus.FORBIDDEN
+      ) {
+        registerFailedAttempt(loginAttemptKey);
+      }
       const { status, message } = extractErrorStatusAndMessage(
         error,
         'Erro ao realizar login.'
@@ -94,7 +172,7 @@ export class AuthController {
   }
 
   @Post('login/admin')
-  async loginAdmin(@Body() body: LoginDto) {
+  async loginAdmin(@Body() body: LoginDto, @Req() req: any) {
     const missing = ['email', 'password'].filter((field) => {
       const value = (body as Record<string, any>)[field];
       return value === undefined || value === null || String(value).trim() === '';
@@ -107,14 +185,24 @@ export class AuthController {
       );
     }
 
+    const loginAttemptKey = buildLoginAttemptKey(body.email, getClientIp(req), 'admin');
+    assertNotRateLimited(loginAttemptKey);
+
     try {
       const { token, user } = await this.authService.loginAdmin(body);
+      clearFailedAttempts(loginAttemptKey);
       return {
         message: 'Login administrativo realizado com sucesso!',
         token,
         user
       };
     } catch (error: any) {
+      if (
+        error?.status === HttpStatus.UNAUTHORIZED ||
+        error?.status === HttpStatus.FORBIDDEN
+      ) {
+        registerFailedAttempt(loginAttemptKey);
+      }
       const { status, message } = extractErrorStatusAndMessage(
         error,
         'Erro ao realizar login.'

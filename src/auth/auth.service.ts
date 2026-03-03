@@ -69,6 +69,8 @@ const normalizeRole = (incomingRole?: string) => {
 };
 
 const isAdminRole = (incomingRole?: string) => normalizeRole(incomingRole) === Role.ADMIN;
+const isInactiveMemberStatus = (memberStatus?: string | null) =>
+  (memberStatus || '').trim().toLowerCase() === 'inativo';
 const normalizePersonType = (incoming?: string, role?: string) => {
   if (incoming?.trim().toLowerCase() === 'membro') return 'Membro';
   if (incoming?.trim().toLowerCase() === 'visitante') return 'Visitante';
@@ -107,7 +109,7 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(data.password, 10);
-    const role = normalizeRole(data.role);
+    const role = Role.MEMBER;
 
     const user = this.usersRepository.create({
       firstName: data.first_name.trim(),
@@ -127,12 +129,13 @@ export class AuthService {
       professionFaithDate: safeTrim(data.profession_faith_date),
       emergencyContactName: safeTrim(data.emergency_contact_name),
       emergencyContactPhone: safeTrim(data.emergency_contact_phone),
-      personType: normalizePersonType(data.person_type, data.role),
+      personType: normalizePersonType(data.person_type, role),
       memberStatus: safeTrim(data.member_status),
       churchEntryDate: safeTrim(data.church_entry_date),
       churchOrigin: safeTrim(data.church_origin),
       internalNotes: safeTrim(data.internal_notes),
       role,
+      sessionVersion: 1,
       passwordHash,
       addressStreet: safeTrim(data.address?.street),
       addressNumber: safeTrim(data.address?.number),
@@ -179,6 +182,7 @@ export class AuthService {
         'createdAt',
         'updatedAt',
         'role',
+        'sessionVersion',
         'passwordHash',
         'addressStreet',
         'addressNumber',
@@ -200,12 +204,20 @@ export class AuthService {
       throw new HttpException('Credenciais inválidas.', HttpStatus.UNAUTHORIZED);
     }
 
+    if (isInactiveMemberStatus(user.memberStatus)) {
+      throw new HttpException('Usuário inativo.', HttpStatus.FORBIDDEN);
+    }
+
+    const nextSessionVersion = (user.sessionVersion || 0) + 1;
+    await this.usersRepository.update({ id: user.id }, { sessionVersion: nextSessionVersion });
+
     const payload = {
       id: user.id,
       first_name: user.firstName,
       last_name: user.lastName,
       email: user.email,
-      role: user.role || Role.MEMBER
+      role: user.role || Role.MEMBER,
+      session_version: nextSessionVersion
     };
 
     const token = await this.jwtService.signAsync(payload);
