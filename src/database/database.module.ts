@@ -9,6 +9,15 @@ import { CommunityPostComment } from '../entities/community-post-comment.entity'
 import { Ministry } from '../entities/ministry.entity';
 import { MinistryMember } from '../entities/ministry-member.entity';
 import { BirthdayMessageTemplate } from '../entities/birthday-message-template.entity';
+import { AccessProfile } from '../entities/access-profile.entity';
+import { InternalEvent } from '../entities/internal-event.entity';
+import { MinistryScheduleTemplate } from '../entities/ministry-schedule-template.entity';
+import { EventMinistrySchedule } from '../entities/event-ministry-schedule.entity';
+import { EventMinistryAssignment } from '../entities/event-ministry-assignment.entity';
+import { UserTimelineEvent } from '../entities/user-timeline-event.entity';
+import { InventoryItem } from '../entities/inventory-item.entity';
+import { InventoryLoan } from '../entities/inventory-loan.entity';
+import { InventoryMaintenanceRequest } from '../entities/inventory-maintenance-request.entity';
 
 @Module({
   imports: [
@@ -38,7 +47,16 @@ import { BirthdayMessageTemplate } from '../entities/birthday-message-template.e
             CommunityPostComment,
             Ministry,
             MinistryMember,
-            BirthdayMessageTemplate
+            BirthdayMessageTemplate,
+            AccessProfile,
+            InternalEvent,
+            MinistryScheduleTemplate,
+            EventMinistrySchedule,
+            EventMinistryAssignment,
+            UserTimelineEvent,
+            InventoryItem,
+            InventoryLoan,
+            InventoryMaintenanceRequest
           ],
           synchronize: false,
           extra: {

@@ -16,6 +16,10 @@
     "migrate:session-version": "npm run prisma:generate && ts-node scripts/migrate-session-version.ts",
     "migrate:ministries": "ts-node scripts/migrate-ministries.ts",
     "migrate:birthday-templates": "ts-node scripts/migrate-birthday-templates.ts",
+    "migrate:events": "ts-node scripts/migrate-events.ts",
+    "migrate:inventory": "ts-node scripts/migrate-inventory.ts",
+    "migrate:access-profiles": "ts-node scripts/migrate-access-profiles.ts",
+    "migrate:user-access-profile": "ts-node scripts/migrate-user-access-profile.ts",
     "db:recreate": "npm run prisma:generate && ts-node scripts/recreate-database.ts"
   },
   "dependencies": {

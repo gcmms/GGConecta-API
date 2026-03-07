@@ -30,7 +30,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
-    const user = await this.usersRepository.findOne({ where: { id: payload.id } });
+    const user = await this.usersRepository.findOne({
+      where: { id: payload.id },
+      relations: { accessProfile: true }
+    });
     if (!user) {
       throw new UnauthorizedException('Token inválido.');
     }
@@ -43,12 +46,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Sessão inválida.');
     }
 
+    const effectiveRole =
+      user.accessProfile &&
+      user.accessProfile.isActive &&
+      (user.accessProfile.baseRole || '').trim().toLowerCase() === 'administrador'
+        ? 'Administrador'
+        : user.role;
+
     return {
       id: user.id,
       first_name: user.firstName,
       last_name: user.lastName,
       email: user.email,
-      role: user.role,
+      role: effectiveRole,
       member_status: user.memberStatus,
       session_version: user.sessionVersion
     };

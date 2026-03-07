@@ -20,6 +20,8 @@ import { UpdateProfileDto } from '../auth/dto/update-profile.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { UpdateAccessSettingsDto } from './dto/update-access-settings.dto';
+import { CreateUserTimelineEventDto } from './dto/create-user-timeline-event.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('Auth')
@@ -111,6 +113,53 @@ export class UsersController {
     }
   }
 
+  @Get(':id/access-settings')
+  async getAccessSettings(@Param('id') idParam: string) {
+    const id = Number(idParam);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new HttpException({ message: 'ID inválido.' }, HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      return await this.usersService.getMemberAccessSettings(id);
+    } catch (error: any) {
+      const status = error?.status || HttpStatus.INTERNAL_SERVER_ERROR;
+      const message =
+        status === HttpStatus.INTERNAL_SERVER_ERROR
+          ? 'Erro ao carregar configurações de acesso.'
+          : error?.message || 'Erro.';
+      throw new HttpException({ message }, status);
+    }
+  }
+
+  @Patch(':id/access-settings')
+  async updateAccessSettings(
+    @Param('id') idParam: string,
+    @Body() body: UpdateAccessSettingsDto
+  ) {
+    const id = Number(idParam);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new HttpException({ message: 'ID inválido.' }, HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const settings = await this.usersService.updateMemberAccessSettings(id, body);
+      return {
+        message: 'Configurações de acesso atualizadas com sucesso.',
+        settings
+      };
+    } catch (error: any) {
+      const status = error?.status || HttpStatus.INTERNAL_SERVER_ERROR;
+      const message =
+        status === HttpStatus.INTERNAL_SERVER_ERROR
+          ? 'Erro ao atualizar configurações de acesso.'
+          : error?.message || 'Erro.';
+      throw new HttpException({ message }, status);
+    }
+  }
+
   @Patch(':id')
   async updateMember(
     @Param('id') idParam: string,
@@ -192,6 +241,59 @@ export class UsersController {
       const message =
         status === HttpStatus.INTERNAL_SERVER_ERROR
           ? 'Erro ao carregar histórico de senha.'
+          : error?.message || 'Erro.';
+      throw new HttpException({ message }, status);
+    }
+  }
+
+  @Get(':id/timeline')
+  async timeline(@Param('id') idParam: string) {
+    const id = Number(idParam);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new HttpException({ message: 'ID inválido.' }, HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      return await this.usersService.listMemberTimeline(id);
+    } catch (error: any) {
+      const status = error?.status || HttpStatus.INTERNAL_SERVER_ERROR;
+      const message =
+        status === HttpStatus.INTERNAL_SERVER_ERROR
+          ? 'Erro ao carregar timeline do membro.'
+          : error?.message || 'Erro.';
+      throw new HttpException({ message }, status);
+    }
+  }
+
+  @Post(':id/timeline')
+  async createTimelineEvent(
+    @Param('id') idParam: string,
+    @Body() body: CreateUserTimelineEventDto,
+    @Req() request: any
+  ) {
+    const id = Number(idParam);
+
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new HttpException({ message: 'ID inválido.' }, HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const adminUserId =
+        Number.isInteger(Number(request?.user?.id)) && Number(request?.user?.id) > 0
+          ? Number(request.user.id)
+          : null;
+
+      const event = await this.usersService.createManualTimelineEvent(id, adminUserId, body);
+      return {
+        message: 'Evento de timeline criado com sucesso.',
+        event
+      };
+    } catch (error: any) {
+      const status = error?.status || HttpStatus.INTERNAL_SERVER_ERROR;
+      const message =
+        status === HttpStatus.INTERNAL_SERVER_ERROR
+          ? 'Erro ao criar evento de timeline.'
           : error?.message || 'Erro.';
       throw new HttpException({ message }, status);
     }

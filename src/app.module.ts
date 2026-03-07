@@ -10,6 +10,8 @@ import { EventsModule } from './events/events.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { MinistriesModule } from './ministries/ministries.module';
 import { BirthdaysModule } from './birthdays/birthdays.module';
+import { AccessProfilesModule } from './access-profiles/access-profiles.module';
+import { InventoryModule } from './inventory/inventory.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -26,7 +28,9 @@ import { AppController } from './app.controller';
     EventsModule,
     DashboardModule,
     MinistriesModule,
-    BirthdaysModule
+    BirthdaysModule,
+    AccessProfilesModule,
+    InventoryModule
   ],
   controllers: [AppController]
 })

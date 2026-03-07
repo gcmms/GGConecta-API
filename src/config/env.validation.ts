@@ -11,6 +11,6 @@ export const envValidationSchema = Joi.object({
   DB_SOCKET_PATH: Joi.string().allow('', null),
   CORS_ORIGINS: Joi.string().allow('', null).default(''),
   JWT_SECRET: Joi.string().required(),
-  GOOGLE_CALENDAR_ICAL_URL: Joi.string().uri().required(),
+  GOOGLE_CALENDAR_ICAL_URL: Joi.string().uri().allow('', null).optional(),
   API_BASE_URL: Joi.string().uri().default('http://localhost:3000')
 });

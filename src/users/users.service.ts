@@ -10,6 +10,9 @@ import { Ministry } from '../entities/ministry.entity';
 import { MinistryMember } from '../entities/ministry-member.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
+import { AccessProfile } from '../entities/access-profile.entity';
+import { UpdateAccessSettingsDto } from './dto/update-access-settings.dto';
+import { CreateUserTimelineEventDto } from './dto/create-user-timeline-event.dto';
 
 type UserMinistryLink = {
   ministry_id: number;
@@ -26,6 +29,18 @@ type PasswordHistoryRow = {
   send_email: number;
   changed_at: Date | string;
   admin_name: string | null;
+};
+
+type TimelineEventRow = {
+  id: number;
+  user_id: number;
+  event_type: string;
+  title: string;
+  description: string | null;
+  event_date: string | Date;
+  source: 'automatico' | 'manual';
+  created_by_user_id: number | null;
+  created_at: string | Date;
 };
 
 const mapUser = (user: User, ministries: UserMinistryLink[] = []) => ({
@@ -55,6 +70,15 @@ const mapUser = (user: User, ministries: UserMinistryLink[] = []) => ({
   created_at: user.createdAt?.toISOString?.() || null,
   updated_at: user.updatedAt?.toISOString?.() || null,
   role: user.role || Role.MEMBER,
+  access_profile_id: user.accessProfileId ?? null,
+  access_profile:
+    user.accessProfile && user.accessProfile.id
+      ? {
+          id: user.accessProfile.id,
+          name: user.accessProfile.name,
+          slug: user.accessProfile.slug
+        }
+      : null,
   ministries,
   address:
     user.addressStreet ||
@@ -99,6 +123,26 @@ const generateTemporaryPassword = (length = 10) => {
   return Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
 };
 
+const toDateOnly = (value?: string | Date | null) => {
+  if (!value) return null;
+  const normalized = `${value}`;
+  const match = normalized.match(/^\d{4}-\d{2}-\d{2}/);
+  if (match) return match[0];
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+};
+
+const toIsoString = (value?: string | Date | null) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toISOString();
+  }
+  return value.toISOString?.() || null;
+};
+
 const ensurePasswordHistoryTableSql = `
   CREATE TABLE IF NOT EXISTS user_password_history (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -115,11 +159,32 @@ const ensurePasswordHistoryTableSql = `
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 `;
 
+const ensureTimelineTableSql = `
+  CREATE TABLE IF NOT EXISTS user_timeline_events (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id INT UNSIGNED NOT NULL,
+    event_type VARCHAR(60) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NULL,
+    event_date DATE NOT NULL,
+    source VARCHAR(20) NOT NULL DEFAULT 'automatico',
+    created_by_user_id INT UNSIGNED NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT pk_user_timeline_events PRIMARY KEY (id),
+    CONSTRAINT fk_user_timeline_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_user_timeline_created_by FOREIGN KEY (created_by_user_id) REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE,
+    INDEX idx_user_timeline_user_date (user_id, event_date),
+    INDEX idx_user_timeline_source (source)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+`;
+
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(AccessProfile)
+    private readonly accessProfilesRepository: Repository<AccessProfile>,
     @InjectRepository(Ministry)
     private readonly ministriesRepository: Repository<Ministry>,
     @InjectRepository(MinistryMember)
@@ -136,7 +201,10 @@ export class UsersService {
   }
 
   async findMemberById(userId: number) {
-    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    const user = await this.usersRepository.findOne({
+      where: { id: userId },
+      relations: { accessProfile: true }
+    });
     if (!user) {
       throw new HttpException('Usuário não encontrado.', HttpStatus.NOT_FOUND);
     }
@@ -202,6 +270,13 @@ export class UsersService {
     });
 
     const saved = await this.usersRepository.save(created);
+    await this.addAutomaticTimelineEvent({
+      userId: saved.id,
+      eventType: 'Cadastro',
+      title: 'Cadastro realizado',
+      description: 'Pessoa cadastrada no sistema.',
+      eventDate: toDateOnly(saved.createdAt) || new Date().toISOString().slice(0, 10)
+    });
     const ministriesByUserId = await this.getMinistryLinksByUserIds([saved.id]);
 
     return {
@@ -220,6 +295,71 @@ export class UsersService {
     const saved = await this.usersRepository.save(user);
     const ministriesByUserId = await this.getMinistryLinksByUserIds([saved.id]);
     return mapUser(saved, ministriesByUserId.get(saved.id) || []);
+  }
+
+  async getMemberAccessSettings(userId: number) {
+    const user = await this.usersRepository.findOne({
+      where: { id: userId },
+      relations: { accessProfile: true }
+    });
+    if (!user) {
+      throw new HttpException('Usuário não encontrado.', HttpStatus.NOT_FOUND);
+    }
+
+    return {
+      user_id: user.id,
+      role: user.role || Role.MEMBER,
+      access_profile_id: user.accessProfileId ?? null,
+      access_profile:
+        user.accessProfile && user.accessProfile.id
+          ? {
+              id: user.accessProfile.id,
+              name: user.accessProfile.name,
+              slug: user.accessProfile.slug
+            }
+          : null
+    };
+  }
+
+  async updateMemberAccessSettings(userId: number, data: UpdateAccessSettingsDto) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new HttpException('Usuário não encontrado.', HttpStatus.NOT_FOUND);
+    }
+
+    let accessProfileId: number | null = null;
+    if (data.access_profile_id !== undefined && data.access_profile_id !== null) {
+      const profile = await this.accessProfilesRepository.findOne({
+        where: { id: data.access_profile_id }
+      });
+      if (!profile) {
+        throw new HttpException('Perfil de acesso não encontrado.', HttpStatus.BAD_REQUEST);
+      }
+      accessProfileId = profile.id;
+    }
+
+    user.accessProfileId =
+      data.access_profile_id === undefined ? user.accessProfileId ?? null : accessProfileId;
+
+    const saved = await this.usersRepository.save(user);
+    const userWithProfile = await this.usersRepository.findOne({
+      where: { id: saved.id },
+      relations: { accessProfile: true }
+    });
+
+    return {
+      user_id: saved.id,
+      role: saved.role || Role.MEMBER,
+      access_profile_id: userWithProfile?.accessProfileId ?? null,
+      access_profile:
+        userWithProfile?.accessProfile && userWithProfile.accessProfile.id
+          ? {
+              id: userWithProfile.accessProfile.id,
+              name: userWithProfile.accessProfile.name,
+              slug: userWithProfile.accessProfile.slug
+            }
+          : null
+    };
   }
 
   async updateMember(userId: number, data: UpdateProfileDto) {
@@ -264,6 +404,74 @@ export class UsersService {
       ...user,
       ...updates
     });
+
+    const timelineEvents: Array<{
+      eventType: string;
+      title: string;
+      description?: string | null;
+      eventDate: string;
+    }> = [];
+
+    if (toDateOnly(user.baptismDate) !== toDateOnly(saved.baptismDate) && saved.baptismDate) {
+      timelineEvents.push({
+        eventType: 'Batismo',
+        title: 'Batismo registrado',
+        eventDate: toDateOnly(saved.baptismDate) || new Date().toISOString().slice(0, 10)
+      });
+    }
+
+    if (
+      toDateOnly(user.professionFaithDate) !== toDateOnly(saved.professionFaithDate) &&
+      saved.professionFaithDate
+    ) {
+      timelineEvents.push({
+        eventType: 'ProfissaoFe',
+        title: 'Profissão de fé registrada',
+        eventDate: toDateOnly(saved.professionFaithDate) || new Date().toISOString().slice(0, 10)
+      });
+    }
+
+    if (toDateOnly(user.churchEntryDate) !== toDateOnly(saved.churchEntryDate) && saved.churchEntryDate) {
+      timelineEvents.push({
+        eventType: 'EntradaIgreja',
+        title: 'Entrada na igreja registrada',
+        eventDate: toDateOnly(saved.churchEntryDate) || new Date().toISOString().slice(0, 10)
+      });
+    }
+
+    if ((user.personType || '') !== (saved.personType || '')) {
+      if ((saved.personType || '').trim().toLowerCase() === 'membro') {
+        timelineEvents.push({
+          eventType: 'Membresia',
+          title: 'Tornou-se membro',
+          eventDate: new Date().toISOString().slice(0, 10)
+        });
+      } else if ((saved.personType || '').trim().toLowerCase() === 'visitante') {
+        timelineEvents.push({
+          eventType: 'Membresia',
+          title: 'Passou para visitante',
+          eventDate: new Date().toISOString().slice(0, 10)
+        });
+      }
+    }
+
+    if ((user.memberStatus || '') !== (saved.memberStatus || '') && saved.memberStatus) {
+      timelineEvents.push({
+        eventType: 'StatusMembro',
+        title: `Status alterado para ${saved.memberStatus}`,
+        eventDate: new Date().toISOString().slice(0, 10)
+      });
+    }
+
+    for (const event of timelineEvents) {
+      await this.addAutomaticTimelineEvent({
+        userId: saved.id,
+        eventType: event.eventType,
+        title: event.title,
+        description: event.description || null,
+        eventDate: event.eventDate
+      });
+    }
 
     const ministriesByUserId = await this.getMinistryLinksByUserIds([saved.id]);
     return mapUser(saved, ministriesByUserId.get(saved.id) || []);
@@ -370,6 +578,137 @@ export class UsersService {
     }));
   }
 
+  async listMemberTimeline(userId: number) {
+    await this.assertUserExists(userId);
+    await this.usersRepository.query(ensureTimelineTableSql);
+
+    const rows = (await this.usersRepository.query(
+      `
+        SELECT
+          id,
+          user_id,
+          event_type,
+          title,
+          description,
+          event_date,
+          source,
+          created_by_user_id,
+          created_at
+        FROM user_timeline_events
+        WHERE user_id = ?
+        ORDER BY event_date DESC, id DESC
+      `,
+      [userId]
+    )) as TimelineEventRow[];
+
+    return rows.map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      event_type: row.event_type,
+      title: row.title,
+      description: row.description,
+      event_date: toDateOnly(row.event_date),
+      source: row.source,
+      created_by_user_id: row.created_by_user_id,
+      created_at: toIsoString(row.created_at)
+    }));
+  }
+
+  async createManualTimelineEvent(
+    userId: number,
+    adminUserId: number | null,
+    data: CreateUserTimelineEventDto
+  ) {
+    await this.assertUserExists(userId);
+    await this.usersRepository.query(ensureTimelineTableSql);
+
+    const eventDate = toDateOnly(data.event_date);
+    if (!eventDate) {
+      throw new HttpException('Data do evento inválida.', HttpStatus.BAD_REQUEST);
+    }
+
+    await this.usersRepository.query(
+      `
+        INSERT INTO user_timeline_events (
+          user_id, event_type, title, description, event_date, source, created_by_user_id
+        ) VALUES (?, ?, ?, ?, ?, 'manual', ?)
+      `,
+      [
+        userId,
+        safeTrim(data.event_type) || 'Manual',
+        data.title.trim(),
+        safeTrim(data.description),
+        eventDate,
+        adminUserId
+      ]
+    );
+
+    const [created] = await this.usersRepository.query(
+      `
+        SELECT
+          id,
+          user_id,
+          event_type,
+          title,
+          description,
+          event_date,
+          source,
+          created_by_user_id,
+          created_at
+        FROM user_timeline_events
+        WHERE user_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `,
+      [userId]
+    );
+
+    return created
+      ? {
+          id: created.id,
+          user_id: created.user_id,
+          event_type: created.event_type,
+          title: created.title,
+          description: created.description,
+          event_date: toDateOnly(created.event_date),
+          source: created.source,
+          created_by_user_id: created.created_by_user_id,
+          created_at: toIsoString(created.created_at)
+        }
+      : null;
+  }
+
+  async addAutomaticTimelineEvent(input: {
+    userId: number;
+    eventType: string;
+    title: string;
+    description?: string | null;
+    eventDate?: string | Date | null;
+  }) {
+    try {
+      await this.assertUserExists(input.userId);
+      await this.usersRepository.query(ensureTimelineTableSql);
+
+      const eventDate = toDateOnly(input.eventDate) || new Date().toISOString().slice(0, 10);
+      await this.usersRepository.query(
+        `
+          INSERT INTO user_timeline_events (
+            user_id, event_type, title, description, event_date, source, created_by_user_id
+          ) VALUES (?, ?, ?, ?, ?, 'automatico', NULL)
+        `,
+        [
+          input.userId,
+          safeTrim(input.eventType) || 'Automatico',
+          input.title.trim(),
+          safeTrim(input.description),
+          eventDate
+        ]
+      );
+    } catch {
+      // Keep core flows working even if timeline write fails.
+    }
+  }
+
   async getMemberWhatsAppLink(userId: number) {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) {
@@ -447,5 +786,12 @@ export class UsersService {
     }
 
     return map;
+  }
+
+  private async assertUserExists(userId: number) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new HttpException('Usuário não encontrado.', HttpStatus.NOT_FOUND);
+    }
   }
 }

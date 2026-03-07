@@ -2,6 +2,8 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn
@@ -11,6 +13,7 @@ import { CommunityPostLike } from './community-post-like.entity';
 import { CommunityPostComment } from './community-post-comment.entity';
 import { Ministry } from './ministry.entity';
 import { MinistryMember } from './ministry-member.entity';
+import { AccessProfile } from './access-profile.entity';
 
 export enum UserRole {
   ADMIN = 'Administrador',
@@ -100,6 +103,9 @@ export class User {
   @Column({ name: 'session_version', type: 'int', default: 1 })
   sessionVersion: number;
 
+  @Column({ name: 'access_profile_id', type: 'int', unsigned: true, nullable: true })
+  accessProfileId?: number | null;
+
   @Column({ name: 'password_hash', select: false })
   passwordHash: string;
 
@@ -147,4 +153,8 @@ export class User {
 
   @OneToMany(() => MinistryMember, (membership) => membership.user)
   ministryMemberships: MinistryMember[];
+
+  @ManyToOne(() => AccessProfile, { nullable: true })
+  @JoinColumn({ name: 'access_profile_id' })
+  accessProfile?: AccessProfile | null;
 }

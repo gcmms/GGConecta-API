@@ -6,6 +6,7 @@ import { MinistryMember } from '../entities/ministry-member.entity';
 import { User } from '../entities/user.entity';
 import { CreateMinistryDto } from './dto/create-ministry.dto';
 import { UpdateMinistryDto } from './dto/update-ministry.dto';
+import { UsersService } from '../users/users.service';
 
 const safeTrim = (value?: string | null) => {
   const trimmed = value?.trim();
@@ -27,7 +28,8 @@ export class MinistriesService {
     @InjectRepository(MinistryMember)
     private readonly ministryMembersRepository: Repository<MinistryMember>,
     @InjectRepository(User)
-    private readonly usersRepository: Repository<User>
+    private readonly usersRepository: Repository<User>,
+    private readonly usersService: UsersService
   ) {}
 
   async list() {
@@ -94,7 +96,7 @@ export class MinistriesService {
       })
     );
 
-    await this.replaceMembers(ministry.id, memberIds);
+    await this.replaceMembers(ministry.id, memberIds, ministry.name);
     const reloaded = await this.loadMinistryOrFail(ministry.id);
     return this.mapMinistry(reloaded);
   }
@@ -151,7 +153,7 @@ export class MinistriesService {
     await this.ministriesRepository.save(ministry);
 
     if (shouldReplaceMembers) {
-      await this.replaceMembers(id, nextMemberIds);
+      await this.replaceMembers(id, nextMemberIds, ministry.name);
     }
 
     const reloaded = await this.loadMinistryOrFail(id);
@@ -183,14 +185,43 @@ export class MinistriesService {
     return ministry;
   }
 
-  private async replaceMembers(ministryId: number, memberIds: number[]) {
-    await this.ministryMembersRepository.delete({ ministryId });
-    if (memberIds.length === 0) return;
+  private async replaceMembers(ministryId: number, memberIds: number[], ministryName: string) {
+    const currentMemberships = await this.ministryMembersRepository.find({
+      where: { ministryId }
+    });
+    const currentUserIds = new Set(currentMemberships.map((item) => item.userId));
+    const nextUserIds = new Set(memberIds);
 
-    const memberships = memberIds.map((userId) =>
-      this.ministryMembersRepository.create({ ministryId, userId })
-    );
-    await this.ministryMembersRepository.save(memberships);
+    const addedUserIds = memberIds.filter((userId) => !currentUserIds.has(userId));
+    const removedUserIds = Array.from(currentUserIds).filter((userId) => !nextUserIds.has(userId));
+
+    await this.ministryMembersRepository.delete({ ministryId });
+    if (memberIds.length > 0) {
+      const memberships = memberIds.map((userId) =>
+        this.ministryMembersRepository.create({ ministryId, userId })
+      );
+      await this.ministryMembersRepository.save(memberships);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    await Promise.all([
+      ...addedUserIds.map((userId) =>
+        this.usersService.addAutomaticTimelineEvent({
+          userId,
+          eventType: 'MinisterioEntrada',
+          title: `Entrou no ministério ${ministryName}`,
+          eventDate: today
+        })
+      ),
+      ...removedUserIds.map((userId) =>
+        this.usersService.addAutomaticTimelineEvent({
+          userId,
+          eventType: 'MinisterioSaida',
+          title: `Saiu do ministério ${ministryName}`,
+          eventDate: today
+        })
+      )
+    ]);
   }
 
   private async validateActiveMembers(
